@@ -1130,7 +1130,15 @@ HAL_StatusTypeDef HAL_UART_Transmit(UART_HandleTypeDef *huart, const uint8_t *pD
         huart->Instance->TDR = (uint8_t)(*pdata8bits & 0xFFU);
         pdata8bits++;
       }
-      huart->TxXferCount--;
+      if ((huart->gState & HAL_UART_STATE_BUSY_TX) == HAL_UART_STATE_BUSY_TX)
+      {
+        huart->TxXferCount--;
+      }
+      else
+      {
+        /* Process was aborted during the transmission */
+        return HAL_ERROR;
+      }
     }
 
     if (UART_WaitOnFlagUntilTimeout(huart, UART_FLAG_TC, RESET, tickstart, Timeout) != HAL_OK)
@@ -1222,7 +1230,15 @@ HAL_StatusTypeDef HAL_UART_Receive(UART_HandleTypeDef *huart, uint8_t *pData, ui
         *pdata8bits = (uint8_t)(huart->Instance->RDR & (uint8_t)uhMask);
         pdata8bits++;
       }
-      huart->RxXferCount--;
+      if (huart->RxState == HAL_UART_STATE_BUSY_RX)
+      {
+        huart->RxXferCount--;
+      }
+      else
+      {
+        /* Process was aborted during the reception */
+        return HAL_ERROR;
+      }
     }
 
     /* At end of Rx process, restore huart->RxState to Ready */
@@ -1636,10 +1652,6 @@ HAL_StatusTypeDef HAL_UART_Abort(UART_HandleTypeDef *huart)
     }
   }
 
-  /* Reset Tx and Rx transfer counters */
-  huart->TxXferCount = 0U;
-  huart->RxXferCount = 0U;
-
   /* Clear the Error flags in the ICR register */
   __HAL_UART_CLEAR_FLAG(huart, UART_CLEAR_OREF | UART_CLEAR_NEF | UART_CLEAR_PEF | UART_CLEAR_FEF);
 
@@ -1700,9 +1712,6 @@ HAL_StatusTypeDef HAL_UART_AbortTransmit(UART_HandleTypeDef *huart)
     }
   }
 
-  /* Reset Tx transfer counter */
-  huart->TxXferCount = 0U;
-
 
   /* Restore huart->gState to Ready */
   huart->gState = HAL_UART_STATE_READY;
@@ -1759,9 +1768,6 @@ HAL_StatusTypeDef HAL_UART_AbortReceive(UART_HandleTypeDef *huart)
       }
     }
   }
-
-  /* Reset Rx transfer counter */
-  huart->RxXferCount = 0U;
 
   /* Clear the Error flags in the ICR register */
   __HAL_UART_CLEAR_FLAG(huart, UART_CLEAR_OREF | UART_CLEAR_NEF | UART_CLEAR_PEF | UART_CLEAR_FEF);
@@ -1887,10 +1893,6 @@ HAL_StatusTypeDef HAL_UART_Abort_IT(UART_HandleTypeDef *huart)
   /* if no DMA abort complete callback execution is required => call user Abort Complete callback */
   if (abortcplt == 1U)
   {
-    /* Reset Tx and Rx transfer counters */
-    huart->TxXferCount = 0U;
-    huart->RxXferCount = 0U;
-
     /* Clear ISR function pointers */
     huart->RxISR = NULL;
     huart->TxISR = NULL;
@@ -1964,8 +1966,6 @@ HAL_StatusTypeDef HAL_UART_AbortTransmit_IT(UART_HandleTypeDef *huart)
     }
     else
     {
-      /* Reset Tx transfer counter */
-      huart->TxXferCount = 0U;
 
       /* Clear TxISR function pointers */
       huart->TxISR = NULL;
@@ -1985,9 +1985,6 @@ HAL_StatusTypeDef HAL_UART_AbortTransmit_IT(UART_HandleTypeDef *huart)
   }
   else
   {
-    /* Reset Tx transfer counter */
-    huart->TxXferCount = 0U;
-
     /* Clear TxISR function pointers */
     huart->TxISR = NULL;
 
@@ -2056,9 +2053,6 @@ HAL_StatusTypeDef HAL_UART_AbortReceive_IT(UART_HandleTypeDef *huart)
     }
     else
     {
-      /* Reset Rx transfer counter */
-      huart->RxXferCount = 0U;
-
       /* Clear RxISR function pointer */
       huart->pRxBuffPtr = NULL;
 
@@ -2084,9 +2078,6 @@ HAL_StatusTypeDef HAL_UART_AbortReceive_IT(UART_HandleTypeDef *huart)
   }
   else
   {
-    /* Reset Rx transfer counter */
-    huart->RxXferCount = 0U;
-
     /* Clear RxISR function pointer */
     huart->pRxBuffPtr = NULL;
 
@@ -3571,7 +3562,6 @@ static void UART_DMAError(DMA_HandleTypeDef *hdma)
   if ((HAL_IS_BIT_SET(huart->Instance->CR3, USART_CR3_DMAT)) &&
       (gstate == HAL_UART_STATE_BUSY_TX))
   {
-    huart->TxXferCount = 0U;
     UART_EndTxTransfer(huart);
   }
 
@@ -3579,7 +3569,6 @@ static void UART_DMAError(DMA_HandleTypeDef *hdma)
   if ((HAL_IS_BIT_SET(huart->Instance->CR3, USART_CR3_DMAR)) &&
       (rxstate == HAL_UART_STATE_BUSY_RX))
   {
-    huart->RxXferCount = 0U;
     UART_EndRxTransfer(huart);
   }
 
@@ -3603,7 +3592,6 @@ static void UART_DMAError(DMA_HandleTypeDef *hdma)
 static void UART_DMAAbortOnError(DMA_HandleTypeDef *hdma)
 {
   UART_HandleTypeDef *huart = (UART_HandleTypeDef *)(hdma->Parent);
-  huart->RxXferCount = 0U;
 
 #if (USE_HAL_UART_REGISTER_CALLBACKS == 1)
   /*Call registered error callback*/
@@ -3636,10 +3624,6 @@ static void UART_DMATxAbortCallback(DMA_HandleTypeDef *hdma)
       return;
     }
   }
-
-  /* No Abort process still ongoing : All DMA channels are aborted, call user Abort Complete callback */
-  huart->TxXferCount = 0U;
-  huart->RxXferCount = 0U;
 
   /* Reset errorCode */
   huart->ErrorCode = HAL_UART_ERROR_NONE;
@@ -3687,10 +3671,6 @@ static void UART_DMARxAbortCallback(DMA_HandleTypeDef *hdma)
     }
   }
 
-  /* No Abort process still ongoing : All DMA channels are aborted, call user Abort Complete callback */
-  huart->TxXferCount = 0U;
-  huart->RxXferCount = 0U;
-
   /* Reset errorCode */
   huart->ErrorCode = HAL_UART_ERROR_NONE;
 
@@ -3728,8 +3708,6 @@ static void UART_DMATxOnlyAbortCallback(DMA_HandleTypeDef *hdma)
 {
   UART_HandleTypeDef *huart = (UART_HandleTypeDef *)(hdma->Parent);
 
-  huart->TxXferCount = 0U;
-
 
   /* Restore huart->gState to Ready */
   huart->gState = HAL_UART_STATE_READY;
@@ -3755,8 +3733,6 @@ static void UART_DMATxOnlyAbortCallback(DMA_HandleTypeDef *hdma)
 static void UART_DMARxOnlyAbortCallback(DMA_HandleTypeDef *hdma)
 {
   UART_HandleTypeDef *huart = (UART_HandleTypeDef *)((DMA_HandleTypeDef *)hdma)->Parent;
-
-  huart->RxXferCount = 0U;
 
   /* Clear the Error flags in the ICR register */
   __HAL_UART_CLEAR_FLAG(huart, UART_CLEAR_OREF | UART_CLEAR_NEF | UART_CLEAR_PEF | UART_CLEAR_FEF);

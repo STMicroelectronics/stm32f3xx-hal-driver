@@ -156,7 +156,8 @@
             HAL_I2C_Master_Seq_Receive_IT() or using HAL_I2C_Master_Seq_Receive_DMA()
       (+++) At reception end of current frame transfer, HAL_I2C_MasterRxCpltCallback() is executed and users can
            add their own code by customization of function pointer HAL_I2C_MasterRxCpltCallback()
-      (++) Abort a master or memory IT or DMA I2C process communication with Interrupt using HAL_I2C_Master_Abort_IT()
+      (++) Abort a master or memory IT or DMA I2C process communication with Interrupt
+           using HAL_I2C_Master_Abort_IT()
       (+++) End of abort process, HAL_I2C_AbortCpltCallback() is executed and users can
            add their own code by customization of function pointer HAL_I2C_AbortCpltCallback()
       (++) Enable/disable the Address listen mode in slave I2C mode using HAL_I2C_EnableListen_IT()
@@ -3267,8 +3268,6 @@ HAL_StatusTypeDef HAL_I2C_IsDeviceReady(I2C_HandleTypeDef *hi2c, uint16_t DevAdd
 
   __IO uint32_t I2C_Trials = 0UL;
 
-  HAL_StatusTypeDef status = HAL_OK;
-
   FlagStatus tmp1;
   FlagStatus tmp2;
 
@@ -3335,10 +3334,6 @@ HAL_StatusTypeDef HAL_I2C_IsDeviceReady(I2C_HandleTypeDef *hi2c, uint16_t DevAdd
             /* Reset the error code for next trial */
             hi2c->ErrorCode = HAL_I2C_ERROR_NONE;
           }
-          else
-          {
-            status = HAL_ERROR;
-          }
         }
         else
         {
@@ -3365,11 +3360,7 @@ HAL_StatusTypeDef HAL_I2C_IsDeviceReady(I2C_HandleTypeDef *hi2c, uint16_t DevAdd
         __HAL_I2C_CLEAR_FLAG(hi2c, I2C_FLAG_AF);
 
         /* Wait until STOPF flag is reset */
-        if (I2C_WaitOnFlagUntilTimeout(hi2c, I2C_FLAG_STOPF, RESET, Timeout, tickstart) != HAL_OK)
-        {
-          status = HAL_ERROR;
-        }
-        else
+        if (I2C_WaitOnFlagUntilTimeout(hi2c, I2C_FLAG_STOPF, RESET, Timeout, tickstart) == HAL_OK)
         {
           /* Clear STOP Flag, auto generated with autoend*/
           __HAL_I2C_CLEAR_FLAG(hi2c, I2C_FLAG_STOPF);
@@ -3378,12 +3369,6 @@ HAL_StatusTypeDef HAL_I2C_IsDeviceReady(I2C_HandleTypeDef *hi2c, uint16_t DevAdd
 
       /* Increment Trials */
       I2C_Trials++;
-
-      if ((I2C_Trials < Trials) && (status == HAL_ERROR))
-      {
-        status = HAL_OK;
-      }
-
     } while (I2C_Trials < Trials);
 
     /* Update I2C state */
@@ -4606,9 +4591,6 @@ HAL_StatusTypeDef HAL_I2C_Master_Abort_IT(I2C_HandleTypeDef *hi2c, uint16_t DevA
 
   if ((tmp_mode == HAL_I2C_MODE_MASTER) || (tmp_mode == HAL_I2C_MODE_MEM))
   {
-    /* Process Locked */
-    __HAL_LOCK(hi2c);
-
     /* Disable Interrupts and Store Previous state */
     if (hi2c->State == HAL_I2C_STATE_BUSY_TX)
     {
@@ -4631,9 +4613,6 @@ HAL_StatusTypeDef HAL_I2C_Master_Abort_IT(I2C_HandleTypeDef *hi2c, uint16_t DevA
     /* Set NBYTES to 1 to generate a dummy read on I2C peripheral */
     /* Set AUTOEND mode, this will generate a NACK then STOP condition to abort the current transfer */
     I2C_TransferConfig(hi2c, DevAddress, 1, I2C_AUTOEND_MODE, I2C_GENERATE_STOP);
-
-    /* Process Unlocked */
-    __HAL_UNLOCK(hi2c);
 
     /* Note : The I2C interrupts must be enabled after unlocking current process
               to avoid the risk of I2C interrupt handle execution before current
@@ -6081,16 +6060,20 @@ static void I2C_ITAddrCplt(I2C_HandleTypeDef *hi2c, uint32_t ITFlags)
 static void I2C_ITMasterSeqCplt(I2C_HandleTypeDef *hi2c)
 {
   /* Reset I2C handle mode */
-  hi2c->Mode = HAL_I2C_MODE_NONE;
-
+  if (I2C_GET_STOP_MODE(hi2c) == I2C_AUTOEND_MODE)
+  {
+    hi2c->Mode = HAL_I2C_MODE_NONE;
+  }
   /* No Generate Stop, to permit restart mode */
   /* The stop will be done at the end of transfer, when I2C_AUTOEND_MODE enable */
   if (hi2c->State == HAL_I2C_STATE_BUSY_TX)
   {
     hi2c->State         = HAL_I2C_STATE_READY;
     hi2c->PreviousState = I2C_STATE_MASTER_BUSY_TX;
-    hi2c->XferISR       = NULL;
-
+    if (I2C_GET_STOP_MODE(hi2c) == I2C_AUTOEND_MODE)
+    {
+      hi2c->XferISR       = NULL;
+    }
     /* Disable Interrupts */
     I2C_Disable_IRQ(hi2c, I2C_XFER_TX_IT);
 
@@ -6109,7 +6092,10 @@ static void I2C_ITMasterSeqCplt(I2C_HandleTypeDef *hi2c)
   {
     hi2c->State         = HAL_I2C_STATE_READY;
     hi2c->PreviousState = I2C_STATE_MASTER_BUSY_RX;
-    hi2c->XferISR       = NULL;
+    if (I2C_GET_STOP_MODE(hi2c) == I2C_AUTOEND_MODE)
+    {
+      hi2c->XferISR       = NULL;
+    }
 
     /* Disable Interrupts */
     I2C_Disable_IRQ(hi2c, I2C_XFER_RX_IT);

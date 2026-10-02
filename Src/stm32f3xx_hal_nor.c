@@ -651,7 +651,7 @@ HAL_StatusTypeDef HAL_NOR_Read(NOR_HandleTypeDef *hnor, uint32_t *pAddress, uint
     if (status != HAL_ERROR)
     {
       /* Read the data */
-      *pData = *(__IO uint16_t *)pAddress;
+      *pData = NOR_READ(pAddress);
     }
 
     /* Check the NOR controller state */
